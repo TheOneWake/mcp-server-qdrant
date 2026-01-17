@@ -14,6 +14,11 @@ DEFAULT_TOOL_FIND_DESCRIPTION = (
     " - Access memories for further analysis \n"
     " - Get some personal information about the user"
 )
+DEFAULT_TOOL_DELETE_DESCRIPTION = (
+    "Delete information from Qdrant. Use this tool when you need to: \n"
+    " - Remove stored entries by query, ids, or metadata filter \n"
+    " - Clean up duplicates or incorrect memories"
+)
 
 METADATA_PATH = "metadata"
 
@@ -30,6 +35,10 @@ class ToolSettings(BaseSettings):
     tool_find_description: str = Field(
         default=DEFAULT_TOOL_FIND_DESCRIPTION,
         validation_alias="TOOL_FIND_DESCRIPTION",
+    )
+    tool_delete_description: str = Field(
+        default=DEFAULT_TOOL_DELETE_DESCRIPTION,
+        validation_alias="TOOL_DELETE_DESCRIPTION",
     )
 
 

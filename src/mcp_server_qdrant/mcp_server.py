@@ -94,11 +94,12 @@ class QdrantMCPServer(FastMCP):
             ctx: Context,
             information: Annotated[str, Field(description="Text to store")],
             collection_name: Annotated[
-                str, Field(description="The collection to store the information in")
-            ],
-            # The `metadata` parameter is defined as non-optional, but it can be None.
-            # If we set it to be optional, some of the MCP clients, like Cursor, cannot
-            # handle the optional parameter correctly.
+                str | None,
+                Field(
+                    description="The collection to store the information in (optional).",
+                    default=None,
+                ),
+            ] = None,
             metadata: Annotated[
                 Metadata | None,
                 Field(
@@ -107,15 +108,9 @@ class QdrantMCPServer(FastMCP):
             ] = None,
         ) -> str:
             """
-            Store some information in Qdrant.
-            :param ctx: The context for the request.
-            :param information: The information to store.
-            :param metadata: JSON metadata to store with the information, optional.
-            :param collection_name: The name of the collection to store the information in, optional. If not provided,
-                                    the default collection is used.
-            :return: A message indicating that the information was stored.
+            Keep the memory for later use, when you are asked to remember something.
             """
-            await ctx.debug(f"Storing information {information} in Qdrant")
+            logger.debug("Storing information in Qdrant: %s", information)
 
             entry = Entry(content=information, metadata=metadata)
 
@@ -128,35 +123,52 @@ class QdrantMCPServer(FastMCP):
             ctx: Context,
             query: Annotated[str, Field(description="What to search for")],
             collection_name: Annotated[
-                str, Field(description="The collection to search in")
-            ],
-            query_filter: ArbitraryFilter | None = None,
+                str | None,
+                Field(
+                    description="The collection to search in (optional).",
+                    default=None,
+                ),
+            ] = None,
+            query_filter: Annotated[
+               ArbitraryFilter | None,
+               Field(
+                   description="The filter to apply to the query (optional). Only available if configured.",
+                   default=None
+               )
+            ] = None,
         ) -> list[str] | None:
             """
-            Find memories in Qdrant.
-            :param ctx: The context for the request.
-            :param query: The query to use for the search.
-            :param collection_name: The name of the collection to search in, optional. If not provided,
-                                    the default collection is used.
-            :param query_filter: The filter to apply to the query.
-            :return: A list of entries found or None.
+            Look up memories in Qdrant. Use this tool when you need to:
+             - Find memories by their content
+             - Access memories for further analysis
+             - Get some personal information about the user
             """
+            
+            # Use provided filter if allowed
+            final_filter = None
+            if self.qdrant_settings.allow_arbitrary_filter:
+                 final_filter = query_filter
 
-            # Log query_filter
-            await ctx.debug(f"Query filter: {query_filter}")
+            if final_filter:
+                 # Convert dict to models.Filter if needed, but signature says ArbitraryFilter which is Dict[str, Any]
+                 # QdrantConnector.search expects models.Filter | None.
+                 # Need to convert dictionary to Filter model
+                 try:
+                    final_filter = models.Filter(**final_filter)
+                 except Exception as e:
+                     logger.error(f"Failed to parse query_filter: {e}")
+                     final_filter = None
 
-            query_filter = models.Filter(**query_filter) if query_filter else None
-
-            await ctx.debug(f"Finding results for query {query}")
+            logger.debug("Finding results for query: %s", query)
 
             entries = await self.qdrant_connector.search(
                 query,
                 collection_name=collection_name,
                 limit=self.qdrant_settings.search_limit,
-                query_filter=query_filter,
+                query_filter=final_filter,
             )
             if not entries:
-                return None
+                return [f"No results for query '{query}'."]
             content = [
                 f"Results for the query '{query}'",
             ]
@@ -164,36 +176,138 @@ class QdrantMCPServer(FastMCP):
                 content.append(self.format_entry(entry))
             return content
 
-        find_foo = find
-        store_foo = store
+        async def delete(
+            ctx: Context,
+            ids: Annotated[
+                list[str] | None,
+                Field(
+                    description="Point IDs to delete. If provided, query/filter are ignored.",
+                    default=None,
+                ),
+            ] = None,
+            dedupe_key: Annotated[
+                str | None,
+                Field(
+                    description=(
+                        "Payload key to dedupe by (e.g., metadata.file_path). Keeps newest/oldest by timestamp."
+                    ),
+                    default=None,
+                ),
+            ] = None,
+            timestamp_field: Annotated[
+                str | None,
+                Field(
+                    description=(
+                        "Payload timestamp field used for ordering (e.g., metadata.last_updated)."
+                    ),
+                    default="metadata.last_updated",
+                ),
+            ] = None,
+            keep: Annotated[
+                str | None,
+                Field(
+                    description="Which entry to keep per group: newest or oldest.",
+                    default="newest",
+                ),
+            ] = None,
+            query: Annotated[
+                str | None,
+                Field(
+                    description=(
+                        "Semantic query to match for deletion. Use with optional query_filter."
+                    ),
+                    default=None,
+                ),
+            ] = None,
+            collection_name: Annotated[
+                str | None,
+                Field(
+                    description="The collection to delete from (optional).",
+                    default=None,
+                ),
+            ] = None,
+            limit: Annotated[
+                int | None,
+                Field(
+                    description="Maximum number of points to delete when using query.",
+                    default=None,
+                ),
+            ] = None,
+            query_filter: Annotated[
+                ArbitraryFilter | None,
+                Field(
+                    description="The filter to apply to deletion (optional). Only available if configured.",
+                    default=None,
+                ),
+            ] = None,
+        ) -> str:
+            """
+            Delete information from Qdrant by ID, query, or filter.
+            """
+            if ids:
+                deleted = await self.qdrant_connector.delete_by_ids(
+                    ids, collection_name=collection_name
+                )
+                return f"Delete requested for {deleted} points."
 
-        filterable_conditions = (
-            self.qdrant_settings.filterable_fields_dict_with_conditions()
-        )
+            final_filter = None
+            if query_filter is not None:
+                if not self.qdrant_settings.allow_arbitrary_filter:
+                    raise ValueError("Arbitrary filters are disabled for this server.")
+                try:
+                    final_filter = models.Filter(**query_filter)
+                except Exception as exc:
+                    logger.error("Failed to parse query_filter: %s", exc)
+                    final_filter = None
 
-        if len(filterable_conditions) > 0:
-            find_foo = wrap_filters(find_foo, filterable_conditions)
-        elif not self.qdrant_settings.allow_arbitrary_filter:
-            find_foo = make_partial_function(find_foo, {"query_filter": None})
+            if dedupe_key:
+                delete_keep = keep or "newest"
+                deleted = await self.qdrant_connector.dedupe_by_payload(
+                    dedupe_key,
+                    timestamp_field=timestamp_field,
+                    keep=delete_keep,
+                    collection_name=collection_name,
+                    query_filter=final_filter,
+                )
+                return (
+                    f"Deduped {deleted} points by '{dedupe_key}' (keep {delete_keep})."
+                )
 
-        if self.qdrant_settings.collection_name:
-            find_foo = make_partial_function(
-                find_foo, {"collection_name": self.qdrant_settings.collection_name}
+            if query:
+                delete_limit = limit or self.qdrant_settings.search_limit
+                deleted = await self.qdrant_connector.delete_by_query(
+                    query,
+                    collection_name=collection_name,
+                    limit=delete_limit,
+                    query_filter=final_filter,
+                )
+                return f"Delete requested for {deleted} points."
+
+            if final_filter:
+                deleted = await self.qdrant_connector.delete_by_filter(
+                    final_filter, collection_name=collection_name
+                )
+                return f"Delete requested for {deleted} points."
+
+            raise ValueError(
+                "Delete requires ids, query, or query_filter to be provided."
             )
-            store_foo = make_partial_function(
-                store_foo, {"collection_name": self.qdrant_settings.collection_name}
-            )
 
+        # Register tools directly with clearer descriptions
         self.tool(
-            find_foo,
+            find,
             name="qdrant-find",
             description=self.tool_settings.tool_find_description,
         )
 
         if not self.qdrant_settings.read_only:
-            # Those methods can modify the database
             self.tool(
-                store_foo,
+                store,
                 name="qdrant-store",
                 description=self.tool_settings.tool_store_description,
+            )
+            self.tool(
+                delete,
+                name="qdrant-delete",
+                description=self.tool_settings.tool_delete_description,
             )

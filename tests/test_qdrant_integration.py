@@ -1,9 +1,11 @@
 import uuid
 
 import pytest
+from qdrant_client import models
 
 from mcp_server_qdrant.embeddings.fastembed import FastEmbedProvider
 from mcp_server_qdrant.qdrant import Entry, QdrantConnector
+from mcp_server_qdrant.settings import METADATA_PATH
 
 
 @pytest.fixture
@@ -236,3 +238,79 @@ async def test_nonexistent_collection_search(qdrant_connector):
 
     # Verify results
     assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_by_query(qdrant_connector):
+    """Test deleting entries by semantic query."""
+    await qdrant_connector.store(Entry(content="delete target alpha"))
+    await qdrant_connector.store(Entry(content="completely unrelated content"))
+
+    deleted = await qdrant_connector.delete_by_query("delete target")
+    assert deleted >= 1
+
+    results = await qdrant_connector.search("delete target")
+    assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_by_filter(qdrant_connector):
+    """Test deleting entries by metadata filter."""
+    await qdrant_connector.store(
+        Entry(content="filter target", metadata={"group": "delete-me"})
+    )
+    await qdrant_connector.store(
+        Entry(content="filter keep", metadata={"group": "keep-me"})
+    )
+
+    query_filter = models.Filter(
+        must=[
+            models.FieldCondition(
+                key=f"{METADATA_PATH}.group",
+                match=models.MatchValue(value="delete-me"),
+            )
+        ]
+    )
+
+    deleted = await qdrant_connector.delete_by_filter(query_filter)
+    assert deleted == 1
+
+    results = await qdrant_connector.search(
+        "filter", query_filter=query_filter
+    )
+    assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_dedupe_by_payload(qdrant_connector):
+    """Test deduplicating entries by payload key with timestamp ordering."""
+    await qdrant_connector.store(
+        Entry(
+            content="dedupe entry old",
+            metadata={"file_path": "Docs/dup.md", "last_updated": "2026-01-01"},
+        )
+    )
+    await qdrant_connector.store(
+        Entry(
+            content="dedupe entry new",
+            metadata={"file_path": "Docs/dup.md", "last_updated": "2026-01-18"},
+        )
+    )
+
+    deleted = await qdrant_connector.dedupe_by_payload(
+        "metadata.file_path",
+        timestamp_field="metadata.last_updated",
+        keep="newest",
+    )
+    assert deleted == 1
+
+    query_filter = models.Filter(
+        must=[
+            models.FieldCondition(
+                key=f"{METADATA_PATH}.file_path",
+                match=models.MatchValue(value="Docs/dup.md"),
+            )
+        ]
+    )
+    results = await qdrant_connector.search("dedupe", query_filter=query_filter)
+    assert len(results) == 1

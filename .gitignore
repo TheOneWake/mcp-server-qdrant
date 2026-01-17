@@ -163,3 +163,27 @@ cython_debug/
 
 # Project-specific settings
 .aider*
+_fastembed_cache/**/*
+_fastembed_cache/*
+
+# MCP runtime logs
+_mcp_*.txt
+
+# Local Qdrant data
+_qdrant/
+
+# Local MCP proxy script (generated)
+qdrant_mcp_stdio_proxy.py
+
+_qdrant/bin/storage/collections/memories/0/**/*
+_qdrant/bin/storage/collections/memories/0/*
+_qdrant/bin/storage/collections/memories/1/**/*
+_qdrant/bin/storage/collections/memories/1/*
+_qdrant/bin/storage/collections/WakeRTS/0/segments/40514615-b105-47e4-90f0-07478865ed8c/version.info
+_qdrant/bin/storage/collections/WakeRTS/0/segments/*/*
+_qdrant/bin/storage/collections/WakeRTS/0/*/*
+_qdrant/bin/storage/collections/WakeRTS/1/segments/40514615
+_qdrant/bin/storage/collections/wakerts-docs/0/segments/**/*
+_qdrant/bin/storage/collections/wakerts-docs/0/*/*
+_qdrant/bin/storage/collections/wakerts-docs/1/segments/**/*
+_qdrant/bin/storage/collections/wakerts-docs/1/*/*

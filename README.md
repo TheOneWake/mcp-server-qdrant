@@ -33,6 +33,19 @@ It acts as a semantic memory layer on top of the Qdrant database.
      - `collection_name` (string): Name of the collection to store the information in. This field is required if there are no default collection name.
                                    If there is a default collection name, this field is not enabled.
    - Returns: Information stored in the Qdrant database as separate messages
+3. `qdrant-delete`
+   - Delete information from the Qdrant database
+   - Input:
+     - `ids` (string[]): Optional point IDs to delete (overrides query/filter)
+     - `dedupe_key` (string): Optional payload key to dedupe by (e.g., `metadata.file_path`)
+     - `timestamp_field` (string): Payload timestamp field for ordering (default `metadata.last_updated`)
+     - `keep` (string): Which entry to keep per group (`newest` or `oldest`)
+     - `query` (string): Optional semantic query to match for deletion
+     - `collection_name` (string): Name of the collection to delete from. This field is required if there are no default collection name.
+                                   If there is a default collection name, this field is not enabled.
+     - `limit` (int): Maximum number of points to delete when using query
+     - `query_filter` (JSON): Optional filter to apply to deletion (only available if configured)
+   - Returns: Confirmation message with count requested for deletion
 
 ## Environment Variables
 
@@ -48,6 +61,7 @@ The configuration of the server is done using environment variables:
 | `EMBEDDING_MODEL`        | Name of the embedding model to use                                  | `sentence-transformers/all-MiniLM-L6-v2`                          |
 | `TOOL_STORE_DESCRIPTION` | Custom description for the store tool                               | See default in [`settings.py`](src/mcp_server_qdrant/settings.py) |
 | `TOOL_FIND_DESCRIPTION`  | Custom description for the find tool                                | See default in [`settings.py`](src/mcp_server_qdrant/settings.py) |
+| `TOOL_DELETE_DESCRIPTION`| Custom description for the delete tool                              | See default in [`settings.py`](src/mcp_server_qdrant/settings.py) |
 
 Note: You cannot provide both `QDRANT_URL` and `QDRANT_LOCAL_PATH` at the same time.
 
